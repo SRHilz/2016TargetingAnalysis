@@ -1,14 +1,20 @@
-#2016.02.01
+#2016.02.22
 #S. Hilz
 #Grimson Lab
 
-#Description: Takes lists of seeds (foreground and background), and first uses targetscan to predict their targets, then performs a ks-test on the RPKMs of their targets
-#Input: <TargetScan_Express_File> File build by BuildTargetScanFile_BySeed_forGeneID.py
-#       <NNN_is_seed_de.txt> is_seed_de.txt file for every comparison made
-#       <NNN_RPKM.txt> file containing RPKM info for every gene for every comparison made
+#Description: Takes lists of seeds (foreground and background), and first uses targetscan to predict their targets, then performs a Mann Whitney U on the CPMs of their targets
+#Input Files: <TargetScan_Express_File> File built by creating an indexed version of the TargetScan Summary Counts file (downloadable from http://www.targetscan.org/cgi-bin/targetscan/data_download.cgi?db=vert_61)
+#            by using the custom script BuildTargetScanFile_BySeed_forGeneID.py (also in this GitHub repo)
+#       <NNN_is_seed_de.txt> is_seed_de.txt file for every comparison made; those used in our analysis in miRCPM250 folder in Github repo
+#       <NNN_CPM.txt> file containing CPM info for every gene for every comparison made; those used in our analysis in RNASeqFCData folder in Github repo
+#       <miR_Family_Info.txt> downloadable from TargetScan (http://www.targetscan.org/cgi-bin/targetscan/data_download.cgi?db=vert_61)
+#Input Parameters: <Comparison> Name you want to give for the two samples you are comparing (can be anything, no spaces)
+#        <PCT Cutoff> PCT (conservation) cutoff you want to use. No cutoff (0) was used for the final results in the manuscript.
+#       <Context Cutoff> Predicted targeting score (context + score) cutoff you want to use. -.1 was used for the final results in the manuscript.
+#       <-v> Optional. Specifies if you want the full output (will output individual files for each seed that can be used to generate individual fold change plots)
 #Output:<NNN_analysis.txt> file for every comparison made with the following columns: seed, is_de, in_ts, target_num, target_num_RPKM, background_target_num, ks test p-value, highest_cpm, log2fc
-#       Column info: seed = the seed, is_de = whether or not the seed was differentially expressed for that condition, in_ts = if it was in the TS database, can_test = if there were at least 5 predicted targets, target_num = how many targets for either the experimental or background set, ks test p-value = p-value from the ks test performed on targets, highest_cpm = average cpm value for condition with the highest exp of that seed, log2fc = log2 fc for that seed 
-#Usage: To run, call python <name_of_this_program> <TargetScan_Express_File> <NNN_is_seed_de.txt> <NNN_RPKM.txt> <Comparison> <PCT Cutoff> <Context Cutoff>
+#       Column info: seed = the seed, is_de = whether or not the seed was differentially expressed for that condition, in_ts = if it was in the TS database, can_test = if there were at least 5 predicted targets, target_num = how many targets for either the experimental or background set, ks test p-value = p-value from the ks test performed on targets, highest_cpm = average cpm value for condition with the highest exp of that seed, log2fc = log2 fc for that seed
+#Usage: To run, call python <name_of_this_program> <TargetScan_Express_File> <NNN_is_seed_de.txt> <NNN_CPM.txt> <Comparison> <PCT Cutoff> <Context Cutoff> <miR Family Info.txt> <-v>
 
 
 #Other: Column Identifiers in TS Express File: Refseq; 1: Symbol; 2: Seed; 3: species filter; 4: #con; 5: #con8mer; 6: #con7merm8; 7: #con7merA1; 8:#noncon; 9:#noncon8mer; 10: #noncon7merm8; 11: #noncon7merA1
@@ -17,14 +23,12 @@
     #SCORE: more negative implies more expected repression
     #PCT: probability of significant conservation
 
-#NOTE: The big differences between this program and all others are that it assumes a background distribution that is for all miRNA targets, and not just targets of not changing miRNAs. This distribution is made by taking a random sample of 10% of all targets of miRNAs
-#USERINPUT (non-command line - will make command line later)
+#USERINPUT (non-command line)
 RNASeqCPMCutoff = 1
 KSTestListSize = 20
 miRNACPMCutoff = 250
 BackgroundSetSampleSize = .05
 
-#Updates: The only update since 2015.05.25 was that I changed the gene identifying from the gene symbol (column 2 of TargetScan file) to the gene ID (column 1); I also made it so you can enter the TS PCT and Conservation scores at the command line
 import sys
 import os
 import numpy as np
@@ -51,7 +55,7 @@ def get_targets(Seed, TSDic, ConsCutoff, ContextCutoff):#ConsCutoff=cutoff for c
                 if Entry[14]!='NULL':
                     if float(Entry[14])>float(ConsCutoff):#conservation cutoff
                         ConsPass=1
-            
+
             else: ConsPass=1
             if ContextCutoff!='NA':
                 if Entry[13]!='NULL':
@@ -65,7 +69,7 @@ def get_targets(Seed, TSDic, ConsCutoff, ContextCutoff):#ConsCutoff=cutoff for c
                 N7mer1aList.append(str(int(Entry[7])+ int(Entry[11])))
                 PCTList.append(str(Entry[14]))
                 ContextList.append(str(Entry[13]))
-                
+
     else: print "Seed not in Dic",Seed
     output = [TargetList, N8merList, N7merm8List, N7mer1aList, ContextList, PCTList]#bundles output into list
     return output
@@ -81,10 +85,14 @@ def ReadTargetScanFile_BySeed(SummaryCountsExpressFile):#reads in file built by 
             seed=line[1:]
             to_return[seed]=[]
         else: to_return[seed].append(line)
-    return to_return       
+    return to_return
 
 ##Part 0: Import List of Conserved Seeds
-infile = open('/local/workdir/sh745/Databases/miR_Family_Info_v6.2.txt','r')
+try:
+    infile = open(sys.argv[7],'r')
+except IndexError:
+    print "No miR_Family_Info.txt input file provided"
+    sys.exit()
 conserved = []
 while 1:
     line=infile.readline()
@@ -103,7 +111,7 @@ infile.close()
 try:
     infile = open(sys.argv[2],'r')
 except IndexError:
-    print "No input file provided"
+    print "No small RNAseq input file provided"
     sys.exit()
 
 seed_info = {}
@@ -118,16 +126,16 @@ while 1:
 
 infile.close()
 
-condition = sys.argv[4]   
+condition = sys.argv[4]
 
 ##Part 2: Import RNASeq
 try:
     infile = open(sys.argv[3],'r')
 except IndexError:
-    print "No input file provided"
+    print "No RNAseq input file provided"
     sys.exit()
 
-rna_seq = {}    
+rna_seq = {}
 
 infile.readline()#remove header
 all_rna = []
@@ -156,7 +164,7 @@ for seed in ts_dic_redundant:
         if transcript_id not in sites_by_transcripts[gene_symbol]:
             sites_by_transcripts[gene_symbol][transcript_id] = 0
         sites_by_transcripts[gene_symbol][transcript_id] += total_sites
-        
+
 optimal_transcripts = []#list of the best transcript to use per gene, determined by firstly if this transcript is expressed, and secondly if this transcript has the most target sites
 
 for gene in sites_by_transcripts:
@@ -191,11 +199,11 @@ for seed in seed_info:
         i = 0
         while i<len(target_info):
             seed_info[seed].append(target_info[i])
-            i+=1  
-    else: 
+            i+=1
+    else:
         seed_info[seed].append('FALSE')
         seed_info[seed].append([])
-    
+
 ##Part 5: Divide target_dic into experimental and background (EDIT IF NEED TO CHANGE WHAT IS EXPERIMENTAL AND BACKGROUND)
 exp_background_targets = []#will for this type of analysis contain all targets of miRNAs for that context score, weighted by number of genes with each type of seed
 site_dic = {}
@@ -211,24 +219,16 @@ for seed in seed_info:
         percent = int(round(len(candidate_background_set)*BackgroundSetSampleSize))
         sample = random.sample(candidate_background_set,percent)
         for target in sample:
-            exp_background_targets.append(target)#this is where the "weighting" happens - we don't make the final background list non-redundant. Instead, we let it contain multiple instances of the same genes - the more time a gene appears, the more sites it has.
-
-outfile = open('sanity_check.txt','w')
-d = defaultdict(int)
-for target in exp_background_targets:
-    d[target] += 1
-for target in d:
-    outfile.write(target+'\t'+str(d[target])+'\n')
-outfile.close()
+            exp_background_targets.append(target)
 
 print "All expressed targets of miRNAs, ",len(list(set(exp_background_targets)))
-                
+
 ##Part 6: Sort RNASeq data into Experimental and Background targets for each seed, perform ks test, and output
 output_context_tag = str(sys.argv[6])
 output_context_tag = output_context_tag.replace('-.0','p')#will get it either way, if the user uses a zero or not
 output_context_tag = output_context_tag.replace('-.','p')
 output_CPM_tag = str(RNASeqCPMCutoff)
-main_outfile = open('20160221_'+condition+'_analysis_Context_'+output_context_tag+'_RNACPM'+output_CPM_tag+'.txt','w')  
+main_outfile = open(condition+'_analysis_Context_'+output_context_tag+'_RNACPM'+output_CPM_tag+'.txt','w')
 
 for seed in seed_info:
     experimental_rpkms, background_rpkms = [],[]
@@ -247,8 +247,8 @@ for seed in seed_info:
         background_rpkms.append(float(rna_seq[gene][2]))
     if len(experimental_rpkms)>=20 and len(background_rpkms)>=20:#this decides finally if we can perform our test
         test_stat = float(mannwhitneyu(experimental_rpkms, background_rpkms)[1])
-        if sys.argv[7]=='-v':
-            outfile = open('20160215_'+condition+'_'+seed+'_analysis_Context_'+output_context_tag+'_RNACPM'+output_CPM_tag+'.txt','w')#seed specific output; needed to look at the distributions in R
+        if sys.argv[8]=='-v':
+            outfile = open(condition+'_'+seed+'_analysis_Context_'+output_context_tag+'_RNACPM'+output_CPM_tag+'.txt','w')#seed specific output; needed to look at the distributions in R
             outfile.write('gene\tlist\ts1_CPM\ts2_CPM\tlog2(s2/s1)fc\tsitecount\t8mers\t7merm8s\t7mer1as\tcontext++\tpct\n')
             for entry in seed_output:
                 outfile.write(entry)
@@ -256,10 +256,4 @@ for seed in seed_info:
     else: test_stat = 'NA'
     main_outfile.write(seed+'\t'+seed_info[seed][2]+'\t'+seed_info[seed][3]+'\t'+str(len(seed_info[seed][4]))+'\t'+str(len(experimental_rpkms))+'\t'+str(len(background_rpkms))+'\t'+str(test_stat)+'\t'+str(np.mean(experimental_rpkms))+'\t'+str(np.mean(background_rpkms))+'\t'+str(seed_info[seed][0])+'\t'+str(seed_info[seed][1])+'\n')
 
-main_outfile.close()    
-
-
-
-
-    
-    
+main_outfile.close()
